@@ -1,7 +1,8 @@
-#include "headers/map.h"
-#include "headers/list.h"
+#include "map.h"
+#include "list.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <unistd.h>
 
 // Global map instance (defined here, declared extern in map.h)
 Map map;
@@ -29,8 +30,8 @@ void init_map(int height, int width) {
         for (int j = 0; j < width; j++) {
             map.cells[i][j].coord.x = i;
             map.cells[i][j].coord.y = j;
-            // Create a survivor list for this cell (capacity 10)
-            map.cells[i][j].survivors = create_list(sizeof(Survivor), 10);
+            // Create a survivor list for this cell
+            map.cells[i][j].survivors = list_create();
         }
     }
 
@@ -41,7 +42,7 @@ void freemap() {
     for (int i = 0; i < map.height; i++) {
         for (int j = 0; j < map.width; j++) {
             // Destroy the survivor list in each cell
-            map.cells[i][j].survivors->destroy(map.cells[i][j].survivors);
+            list_destroy(map.cells[i][j].survivors, survivor_destroy);
         }
         free(map.cells[i]);
     }
