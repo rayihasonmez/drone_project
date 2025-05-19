@@ -1,7 +1,6 @@
 # Emergency Drone Coordination System
 
 **Acil durumlarda droneların, hayatta kalanları (survivor) bulup kurtarmasını sağlayan, gerçek zamanlı ve çoklu-thread destekli bir koordinasyon sistemi.**  
-Bu proje, ODTÜ CENG 334/583 "Distributed Systems" dersi için geliştirilmiştir.
 
 ---
 
