@@ -66,6 +66,7 @@ void* survivor_generator(void* arg) {
     return NULL;
 }
 void* handle_drone(void* arg) {
+    printf("Yeni drone thread başlatıldı!\n");
     int client_fd = *(int*)arg;
     free(arg);
     char buffer[1024];
@@ -85,8 +86,8 @@ void* handle_drone(void* arg) {
             const char *status = json_object_get_string(json_object_object_get(jobj, "status"));
 
             pthread_mutex_lock(&drone_list_mutex);
-int found = 0;
-for (int i = 0; i < drone_count; ++i) {
+            int found = 0;
+            for (int i = 0; i < drone_count; ++i) {
     if (strcmp(drone_list[i].id, drone_id) == 0) {
         drone_list[i].x = x;
         drone_list[i].y = y;
@@ -102,19 +103,19 @@ if (!found && drone_count < MAX_DRONES) {
     drone_list[drone_count].y = y;
     strncpy(drone_list[drone_count].status, status, sizeof(drone_list[drone_count].status));
     drone_list[drone_count].fd = client_fd;
+    drone_list[drone_count].has_target = 0;
     drone_count++;
-    assign_missions();
 }
 pthread_mutex_unlock(&drone_list_mutex);
-            printf("---- Drone Listesi ----\n");
-for (int i = 0; i < drone_count; ++i) {
-    printf("ID: %s | Konum: (%d, %d) | Durum: %s\n",
-        drone_list[i].id, drone_list[i].x, drone_list[i].y, drone_list[i].status);
-}
-printf("-----------------------\n");
-            // pthread_mutex_unlock(&drone_list_mutex);
 
-            // Survivor listesini de yazdırmak istersen:
+            // Konsola yazdır
+            printf("---- Drone Listesi ----\n");
+            for (int i = 0; i < drone_count; ++i) {
+                printf("ID: %s | Konum: (%d, %d) | Durum: %s\n",
+                    drone_list[i].id, drone_list[i].x, drone_list[i].y, drone_list[i].status);
+            }
+            printf("-----------------------\n");
+
             pthread_mutex_lock(&survivor_list_mutex);
             printf("---- Survivor Listesi ----\n");
             for (int i = 0; i < survivor_count; ++i) {
@@ -153,22 +154,29 @@ void assign_missions() {
             }
         }
         if (closest != -1) {
-            // Görev ata
-            struct json_object *mission = json_object_new_object();
-            json_object_object_add(mission, "type", json_object_new_string("mission"));
-            struct json_object *target = json_object_new_array();
-            json_object_array_add(target, json_object_new_int(survivor_list[s].x));
-            json_object_array_add(target, json_object_new_int(survivor_list[s].y));
-            json_object_object_add(mission, "target", target);
+    // Görev ata
+    struct json_object *mission = json_object_new_object();
+    json_object_object_add(mission, "type", json_object_new_string("mission"));
+    struct json_object *target = json_object_new_array();
+    json_object_array_add(target, json_object_new_int(survivor_list[s].x));
+    json_object_array_add(target, json_object_new_int(survivor_list[s].y));
+    json_object_object_add(mission, "target", target);
 
-            const char *mission_str = json_object_to_json_string(mission);
-            send(drone_list[closest].fd, mission_str, strlen(mission_str), 0);
-            printf("Drone %s için görev atandı: Survivor (%d,%d)\n",
-                   drone_list[closest].id, survivor_list[s].x, survivor_list[s].y);
-            strncpy(drone_list[closest].status, "on_mission", sizeof(drone_list[closest].status));
-            survivor_list[s].helped = 1; // Atandı, başka drone’a atanmasın
-            json_object_put(mission);
-        }
+    const char *mission_str = json_object_to_json_string(mission);
+    send(drone_list[closest].fd, mission_str, strlen(mission_str), 0);
+    printf("Drone %s için görev atandı: Survivor (%d,%d)\n",
+           drone_list[closest].id, survivor_list[s].x, survivor_list[s].y);
+    strncpy(drone_list[closest].status, "on_mission", sizeof(drone_list[closest].status));
+    survivor_list[s].assigned = 1; // <-- YEŞİL ÇİZGİ için
+    survivor_list[s].helped = 1;   // Gri yapmak için (görev atandıysa)
+
+    // BURAYA EKLE:
+    drone_list[closest].target_x = survivor_list[s].x;
+    drone_list[closest].target_y = survivor_list[s].y;
+    drone_list[closest].has_target = 1;
+
+    json_object_put(mission);
+}
     }
 
     pthread_mutex_unlock(&drone_list_mutex);
@@ -177,10 +185,7 @@ void assign_missions() {
 int main() {
     printf("main başladı\n");
     view_init();
-    //    pthread_t view_tid;
-    // pthread_create(&view_tid, NULL, view_thread_func, NULL);
-    // pthread_detach(view_tid);
-    
+
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0) {
         perror("socket");
@@ -196,40 +201,31 @@ int main() {
         perror("bind");
         exit(1);
     }
-    survivor_list[0].x = 10;
-    survivor_list[0].y = 10;
-    survivor_list[0].helped = 0;
-    survivor_count = 1;
-
-    strcpy(drone_list[0].id, "testdrone");
-    drone_list[0].x = 20;
-    drone_list[0].y = 20;
-    strcpy(drone_list[0].status, "idle");
-    drone_count = 1;
 
     if (listen(server_fd, 10) < 0) {
         perror("listen");
         exit(1);
     }
 
-    // Sadece bir kez başlat!
+    // Survivor üretici thread'i başlat
     pthread_t survivor_tid;
     pthread_create(&survivor_tid, NULL, survivor_generator, NULL);
     pthread_detach(survivor_tid);
 
     printf("Server dinleniyor (port %d)...\n", SERVER_PORT);
+
     fd_set readfds;
     struct timeval tv;
 
- while (1) {
-       printf("ana döngüdeyim\n");
+    while (1) {
+        // Görsel güncelleme
         pthread_mutex_lock(&survivor_list_mutex);
         pthread_mutex_lock(&drone_list_mutex);
         view_update(survivor_list, survivor_count, drone_list, drone_count);
         pthread_mutex_unlock(&drone_list_mutex);
         pthread_mutex_unlock(&survivor_list_mutex);
 
-        // 2. Client bağlantısı kontrolü (non-blocking accept)
+        // Yeni client bağlantısı kontrolü (non-blocking accept)
         FD_ZERO(&readfds);
         FD_SET(server_fd, &readfds);
         tv.tv_sec = 0;
@@ -237,19 +233,19 @@ int main() {
 
         int activity = select(server_fd + 1, &readfds, NULL, NULL, &tv);
         if (activity > 0 && FD_ISSET(server_fd, &readfds)) {
-    struct sockaddr_in client_addr;
-    socklen_t addrlen = sizeof(client_addr);
-    int* client_fd = malloc(sizeof(int));
-    *client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
-    if (*client_fd < 0) {
-        perror("accept");
-        free(client_fd);
-        continue;
-    }
-    pthread_t tid;
-    pthread_create(&tid, NULL, handle_drone, client_fd);
-    pthread_detach(tid);
-}
+            struct sockaddr_in client_addr;
+            socklen_t addrlen = sizeof(client_addr);
+            int* client_fd = malloc(sizeof(int));
+            *client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &addrlen);
+            if (*client_fd < 0) {
+                perror("accept");
+                free(client_fd);
+                continue;
+            }
+            pthread_t tid;
+            pthread_create(&tid, NULL, handle_drone, client_fd);
+            pthread_detach(tid);
+        }
         // Döngü devam eder, her 100ms'de bir render ve accept kontrolü yapılır
     }
 
@@ -257,6 +253,7 @@ int main() {
     view_quit();
     return 0;
 }
+
 //     while (1) {
 //         struct sockaddr_in client_addr;
 //         socklen_t addrlen = sizeof(client_addr);
