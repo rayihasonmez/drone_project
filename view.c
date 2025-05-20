@@ -49,48 +49,74 @@ static void draw_circle(int x, int y, int r, SDL_Color color) {
 
 // view_update fonksiyonu
 void view_update(Survivor* survivors, int survivor_count, DroneInfo* drones, int drone_count) {
-    printf("view_update çağrıldı: drone_count=%d\n", drone_count);
-    for (int i = 0; i < drone_count; ++i) {
-        printf("Çizilecek drone: %s (%d,%d)\n", drones[i].id, drones[i].x, drones[i].y);
-    }
-    SDL_SetRenderDrawColor(ren, 240, 240, 240, 255); // Açık gri arka plan
+    int grid_size = 16; // Her hücre 16x16 piksel
+    int grid_w = WIN_W / grid_size;
+    int grid_h = WIN_H / grid_size;
+
+    SDL_SetRenderDrawColor(ren, 255, 255, 255, 255); // Beyaz arka plan
     SDL_RenderClear(ren);
 
-    // Survivorları çiz
-    for (int i = 0; i < survivor_count; ++i) {
-        SDL_Color color;
-        if (survivors[i].helped)
-            color = (SDL_Color){128, 128, 128, 255}; // Gri
-        else
-            color = (SDL_Color){220, 0, 0, 255};     // Kırmızı
-        SDL_Rect rect = { survivors[i].x * 8, survivors[i].y * 8, 16, 16 };
-        SDL_SetRenderDrawColor(ren, color.r, color.g, color.b, color.a);
-        SDL_RenderFillRect(ren, &rect);
-
-        // Survivor etiketi
-        char label[16];
-        snprintf(label, sizeof(label), "S%d", i+1);
-        draw_text(rect.x + 2, rect.y - 18, label, color);
+    // --- GRID ÇİZ ---
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255); // Grid çizgileri için siyah
+    for (int x = 0; x <= WIN_W; x += grid_size) {
+        SDL_RenderDrawLine(ren, x, 0, x, WIN_H);
+    }
+    for (int y = 0; y <= WIN_H; y += grid_size) {
+        SDL_RenderDrawLine(ren, 0, y, WIN_W, y);
     }
 
-    // Droneları çiz ve görevdeyse yeşil çizgi çiz
-    for (int i = 0; i < drone_count; ++i) {
-        SDL_Color blue = {0, 100, 255, 255};
-        draw_circle(drones[i].x * 8 + 8, drones[i].y * 8 + 8, 10, blue);
+// ...existing code...
 
-        // Drone etiketi
-        char label[16];
-        snprintf(label, sizeof(label), "%s", drones[i].id);
-        draw_text(drones[i].x * 8, drones[i].y * 8 + 18, label, blue);
+// Survivorları çiz
+for (int i = 0; i < survivor_count; ++i) {
+    // Sınır kontrolü
+    if (survivors[i].x < 0 || survivors[i].x >= grid_w ||
+        survivors[i].y < 0 || survivors[i].y >= grid_h)
+        continue;
 
-        // Görevdeyse survivor'a yeşil çizgi
-        if (drones[i].has_target) {
-            SDL_SetRenderDrawColor(ren, 0, 200, 0, 255);
-            SDL_RenderDrawLine(ren,
-                drones[i].x * 8 + 8, drones[i].y * 8 + 8,
-                drones[i].target_x * 8 + 8, drones[i].target_y * 8 + 8);
-        }
+    SDL_Color color;
+    if (survivors[i].helped)
+        color = (SDL_Color){128, 128, 128, 255}; // Gri
+    else
+        color = (SDL_Color){220, 0, 0, 255};     // Kırmızı
+    SDL_Rect rect = { survivors[i].x * grid_size, survivors[i].y * grid_size, grid_size, grid_size };
+    SDL_SetRenderDrawColor(ren, color.r, color.g, color.b, color.a);
+    SDL_RenderFillRect(ren, &rect);
+
+    // Survivor etiketi
+    char label[16];
+    snprintf(label, sizeof(label), "S%d", i+1);
+    draw_text(rect.x + 2, rect.y - 18, label, color);
+}
+
+// Droneları çiz ve görevdeyse yeşil çizgi çiz
+for (int i = 0; i < drone_count; ++i) {
+    // Sınır kontrolü
+    if (drones[i].x < 0 || drones[i].x >= grid_w ||
+        drones[i].y < 0 || drones[i].y >= grid_h)
+        continue;
+
+    SDL_Color blue = {0, 100, 255, 255};
+    int cx = drones[i].x * grid_size + grid_size / 2;
+    int cy = drones[i].y * grid_size + grid_size / 2;
+    draw_circle(cx, cy, grid_size / 2, blue);
+
+    // Drone etiketi
+    char label[16];
+    snprintf(label, sizeof(label), "%s", drones[i].id);
+    draw_text(cx - grid_size / 2, cy + grid_size / 2, label, blue);
+
+    // Görevdeyse survivor'a yeşil çizgi
+    if (drones[i].has_target &&
+        drones[i].target_x >= 0 && drones[i].target_x < grid_w &&
+        drones[i].target_y >= 0 && drones[i].target_y < grid_h) {
+        SDL_SetRenderDrawColor(ren, 0, 200, 0, 255);
+        SDL_RenderDrawLine(ren,
+            cx, cy,
+            drones[i].target_x * grid_size + grid_size / 2,
+            drones[i].target_y * grid_size + grid_size / 2);
     }
+}
 
     // İstatistik paneli ve legend
     SDL_Color black = {0,0,0,255};
