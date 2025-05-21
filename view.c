@@ -3,7 +3,7 @@
 #include "view.h"
 #include "common.h"
 #include <unistd.h>
-#define WIN_W 800
+#define WIN_W 1200
 #define WIN_H 800
 
 SDL_Window* win = NULL;

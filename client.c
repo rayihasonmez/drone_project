@@ -85,18 +85,18 @@ while (1) {
         if (reply) {
             const char *type = json_object_get_string(json_object_object_get(reply, "type"));
             if (type && strcmp(type, "ASSIGN_MISSION") == 0) {
-                // Görev bilgilerini al
-                const char *mission_id = json_object_get_string(json_object_object_get(reply, "mission_id"));
-                struct json_object *target = json_object_object_get(reply, "target");
-                int tx = json_object_get_int(json_object_object_get(target, "x"));
-                int ty = json_object_get_int(json_object_object_get(target, "y"));
-                printf("Yeni görev atandı! Mission ID: %s, Hedef: (%d,%d)\n", mission_id, tx, ty);
+    // Görev bilgilerini al
+    const char *mission_id = json_object_get_string(json_object_object_get(reply, "mission_id"));
+    struct json_object *target = json_object_object_get(reply, "target");
+    int tx = json_object_get_int(json_object_object_get(target, "x"));
+    int ty = json_object_get_int(json_object_object_get(target, "y"));
+    printf("Yeni görev atandı! Mission ID: %s, Hedef: (%d,%d)\n", mission_id, tx, ty);
 
-                target_x = tx;
-                target_y = ty;
-                strncpy(current_mission_id, mission_id, sizeof(current_mission_id));
-                strcpy(status, "on_mission");
-            }
+    target_x = tx;
+    target_y = ty;
+    strncpy(current_mission_id, mission_id, sizeof(current_mission_id));
+    strcpy(status, "on_mission");
+}
             else if (type && strcmp(type, "HEARTBEAT") == 0) {
             struct json_object *resp = json_object_new_object();
             json_object_object_add(resp, "type", json_object_new_string("HEARTBEAT_RESPONSE"));
@@ -114,33 +114,33 @@ while (1) {
 
    // 3. Eğer görevdeyse hedefe ilerle
     if (strcmp(status, "on_mission") == 0 && target_x >= 0 && target_y >= 0) {
-        if (x < target_x) x++;
-        else if (x > target_x) x--;
-        if (y < target_y) y++;
-        else if (y > target_y) y--;
+    if (x < target_x) x++;
+    else if (x > target_x) x--;
+    if (y < target_y) y++;
+    else if (y > target_y) y--;
 
-        // Hedefe ulaştıysa
-        if (x == target_x && y == target_y) {
-            printf("Görev tamamlandı! Mission ID: %s\n", current_mission_id);
-            strcpy(status, "idle");
-            target_x = target_y = -1;
+    // Hedefe ulaştıysa
+    if (x == target_x && y == target_y) {
+        printf("Görev tamamlandı! Mission ID: %s\n", current_mission_id);
+        strcpy(status, "idle");
+        target_x = target_y = -1;
 
-            // MISSION_COMPLETE mesajı gönder
-            struct json_object *complete = json_object_new_object();
-            json_object_object_add(complete, "type", json_object_new_string("MISSION_COMPLETE"));
-            json_object_object_add(complete, "drone_id", json_object_new_string(argv[1]));
-            json_object_object_add(complete, "mission_id", json_object_new_string(current_mission_id));
-            json_object_object_add(complete, "timestamp", json_object_new_int(time(NULL)));
-            json_object_object_add(complete, "success", json_object_new_boolean(1));
-            json_object_object_add(complete, "details", json_object_new_string("Delivered aid to survivor."));
-            const char *comp_str = json_object_to_json_string(complete);
-            send(sockfd, comp_str, strlen(comp_str), 0);
-            json_object_put(complete);
+        // MISSION_COMPLETE mesajı gönder
+        struct json_object *complete = json_object_new_object();
+        json_object_object_add(complete, "type", json_object_new_string("MISSION_COMPLETE"));
+        json_object_object_add(complete, "drone_id", json_object_new_string(argv[1]));
+        json_object_object_add(complete, "mission_id", json_object_new_string(current_mission_id));
+        json_object_object_add(complete, "timestamp", json_object_new_int(time(NULL)));
+        json_object_object_add(complete, "success", json_object_new_boolean(1));
+        json_object_object_add(complete, "details", json_object_new_string("Delivered aid to survivor."));
+        const char *comp_str = json_object_to_json_string(complete);
+        send(sockfd, comp_str, strlen(comp_str), 0);
+        json_object_put(complete);
 
-            current_mission_id[0] = '\0';
-        }
+        current_mission_id[0] = '\0';
     }
-
+}
+    printf("Drone konumu: (%d, %d), status: %s\n", x, y, status);
     sleep(1);
 }
 

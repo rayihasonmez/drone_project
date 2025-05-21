@@ -15,22 +15,11 @@ void view_init();
 void view_update(Survivor*, int, DroneInfo*, int);
 void view_quit();
 
-// typedef struct {
-//     int x, y;
-//     int helped; // 0: bekliyor, 1: yardım edildi
-// } Survivor;
 
 #define MAX_SURVIVORS 100
 Survivor survivor_list[MAX_SURVIVORS];
 int survivor_count = 0;
 pthread_mutex_t survivor_list_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-// typedef struct {
-//     char id[32];
-//     int x, y;
-//     char status[16];
-//     int fd;
-// } DroneInfo;
 
 #define MAX_DRONES 100
 DroneInfo drone_list[MAX_DRONES];
@@ -39,30 +28,34 @@ pthread_mutex_t drone_list_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 #define SERVER_PORT 12345
 
-// void* view_thread_func(void* arg) {
-//     (void)arg;
-//     while (1) {
-//         pthread_mutex_lock(&survivor_list_mutex);
-//         pthread_mutex_lock(&drone_list_mutex);
-//         view_update(survivor_list, survivor_count, drone_list, drone_count);
-//         pthread_mutex_unlock(&drone_list_mutex);
-//         pthread_mutex_unlock(&survivor_list_mutex);
-//         SDL_Delay(50); // 20 FPS
-//     }
-//     return NULL;
-// }
+#define MAP_WIDTH 75
+#define MAP_HEIGHT 50
+
 void* survivor_generator(void* arg) {
     (void)arg;
     while (1) {
         pthread_mutex_lock(&survivor_list_mutex);
         if (survivor_count < MAX_SURVIVORS) {
-            survivor_list[survivor_count].x = rand() % 80 + 5;
-            survivor_list[survivor_count].y = rand() % 80 + 5;
+            int x, y, overlap;
+            do {
+                overlap = 0;
+                x = rand() % MAP_WIDTH;
+                y = rand() % MAP_HEIGHT;
+                for (int i = 0; i < survivor_count; ++i) {
+                    if (survivor_list[i].x == x && survivor_list[i].y == y) {
+                        overlap = 1;
+                        break;
+                    }
+                }
+            } while (overlap);
+            survivor_list[survivor_count].x = x;
+            survivor_list[survivor_count].y = y;
             survivor_list[survivor_count].helped = 0;
+            survivor_list[survivor_count].assigned = 0;
             survivor_count++;
         }
         pthread_mutex_unlock(&survivor_list_mutex);
-        sleep(5); // Her 5 saniyede bir yeni survivor
+        sleep(5);
     }
     return NULL;
 }
@@ -158,16 +151,18 @@ void* handle_drone(void* arg) {
                 }
                     else if (strcmp(type, "MISSION_COMPLETE") == 0) {
     const char *mission_id = json_object_get_string(json_object_object_get(jobj, "mission_id"));
-    // mission_id ile survivor'u bul:
+    pthread_mutex_lock(&survivor_list_mutex);
     for (int i = 0; i < survivor_count; ++i) {
         char expected_id[32];
         snprintf(expected_id, sizeof(expected_id), "M%03d", i);
         if (strcmp(mission_id, expected_id) == 0) {
             survivor_list[i].helped = 1;
+            survivor_list[i].assigned = 0;
             break;
         }
     }
-    pthread_mutex_unlock(&drone_list_mutex);
+    pthread_mutex_unlock(&survivor_list_mutex);
+
 
                     // Konsola yazdır
                     printf("---- Drone Listesi ----\n");
@@ -199,16 +194,19 @@ void* handle_drone(void* arg) {
     return NULL;
 }
 void assign_missions() {
+    int drone_busy[MAX_DRONES] = {0};
     pthread_mutex_lock(&survivor_list_mutex);
     pthread_mutex_lock(&drone_list_mutex);
 
     for (int s = 0; s < survivor_count; ++s) {
-        if (survivor_list[s].helped) continue; // Zaten yardım edilmiş
+        if (survivor_list[s].helped) continue;
+        if (survivor_list[s].assigned) continue;
 
         int closest = -1;
         int min_dist = 1000000;
         for (int d = 0; d < drone_count; ++d) {
             if (strcmp(drone_list[d].status, "idle") != 0) continue;
+            if (drone_busy[d]) continue;
             int dx = drone_list[d].x - survivor_list[s].x;
             int dy = drone_list[d].y - survivor_list[s].y;
             int dist = dx*dx + dy*dy;
@@ -217,31 +215,30 @@ void assign_missions() {
                 closest = d;
             }
         }
-        // assign_missions içinde:
-if (closest != -1) {
-    struct json_object *mission = json_object_new_object();
-    char mission_id[32];
-    snprintf(mission_id, sizeof(mission_id), "M%03d", s);
-    json_object_object_add(mission, "type", json_object_new_string("ASSIGN_MISSION"));
-    json_object_object_add(mission, "mission_id", json_object_new_string(mission_id));
-  
-            json_object_object_add(mission, "priority", json_object_new_string("high")); // örnek öncelik
+        if (closest != -1) {
+            struct json_object *mission = json_object_new_object();
+            char mission_id[32];
+            snprintf(mission_id, sizeof(mission_id), "M%03d", s);
+            json_object_object_add(mission, "type", json_object_new_string("ASSIGN_MISSION"));
+            json_object_object_add(mission, "mission_id", json_object_new_string(mission_id));
+            json_object_object_add(mission, "priority", json_object_new_string("high"));
 
             struct json_object *target = json_object_new_object();
             json_object_object_add(target, "x", json_object_new_int(survivor_list[s].x));
             json_object_object_add(target, "y", json_object_new_int(survivor_list[s].y));
             json_object_object_add(mission, "target", target);
 
-            json_object_object_add(mission, "expiry", json_object_new_int(time(NULL) + 600)); // 10 dakika sonrası
-            json_object_object_add(mission, "checksum", json_object_new_string("a1b2c3")); // örnek checksum
+            json_object_object_add(mission, "expiry", json_object_new_int(time(NULL) + 600));
+            json_object_object_add(mission, "checksum", json_object_new_string("a1b2c3"));
 
             const char *mission_str = json_object_to_json_string(mission);
             send(drone_list[closest].fd, mission_str, strlen(mission_str), 0);
             printf("Drone %s için görev atandı: Survivor (%d,%d)\n",
                    drone_list[closest].id, survivor_list[s].x, survivor_list[s].y);
+
             strncpy(drone_list[closest].status, "on_mission", sizeof(drone_list[closest].status));
             survivor_list[s].assigned = 1;
-            // survivor_list[s].helped = 1;
+            drone_busy[closest] = 1;
 
             drone_list[closest].target_x = survivor_list[s].x;
             drone_list[closest].target_y = survivor_list[s].y;
@@ -328,8 +325,9 @@ if (heartbeat_counter >= 100) { // 100 x 100ms = 10 saniye
     send_heartbeat_to_all();
     heartbeat_counter = 0;
 }
-    }
 
+    }
+    
     close(server_fd);
     view_quit();
     return 0;
