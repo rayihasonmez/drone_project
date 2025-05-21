@@ -150,6 +150,7 @@ void* handle_drone(void* arg) {
                     pthread_mutex_unlock(&drone_list_mutex);
                 }
                     else if (strcmp(type, "MISSION_COMPLETE") == 0) {
+    printf("MISSION_COMPLETE mesajı alındı!\n");
     const char *mission_id = json_object_get_string(json_object_object_get(jobj, "mission_id"));
     pthread_mutex_lock(&survivor_list_mutex);
     for (int i = 0; i < survivor_count; ++i) {
@@ -162,6 +163,17 @@ void* handle_drone(void* arg) {
         }
     }
     pthread_mutex_unlock(&survivor_list_mutex);
+
+    // İlgili drone'un has_target'ını sıfırla
+    pthread_mutex_lock(&drone_list_mutex);
+    for (int i = 0; i < drone_count; ++i) {
+        if (drone_list[i].fd == client_fd) {
+            drone_list[i].has_target = 0;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&drone_list_mutex);
+}
 
 
                     // Konsola yazdır
@@ -185,64 +197,59 @@ void* handle_drone(void* arg) {
                 // Buraya diğer mesaj tipleri (MISSION_COMPLETE, HEARTBEAT_RESPONSE, vs.) eklenebilir
             }
             json_object_put(jobj);
-        } else {
             printf("Drone'dan mesaj (JSON değil): %s\n", buffer);
-        }
+        
     }
     printf("Drone bağlantısı kapandı (fd: %d)\n", client_fd);
     close(client_fd);
     return NULL;
 }
 void assign_missions() {
-    int drone_busy[MAX_DRONES] = {0};
     pthread_mutex_lock(&survivor_list_mutex);
     pthread_mutex_lock(&drone_list_mutex);
 
-    for (int s = 0; s < survivor_count; ++s) {
-        if (survivor_list[s].helped) continue;
-        if (survivor_list[s].assigned) continue;
+    for (int d = 0; d < drone_count; ++d) {
+        if (strcmp(drone_list[d].status, "idle") != 0) continue;
+        if (drone_list[d].has_target) continue;
 
-        int closest = -1;
-        int min_dist = 1000000;
-        for (int d = 0; d < drone_count; ++d) {
-            if (strcmp(drone_list[d].status, "idle") != 0) continue;
-            if (drone_busy[d]) continue;
+        int closest = -1, min_dist = 1000000;
+        for (int s = 0; s < survivor_count; ++s) {
+            if (survivor_list[s].helped) continue;
+            if (survivor_list[s].assigned) continue;
             int dx = drone_list[d].x - survivor_list[s].x;
             int dy = drone_list[d].y - survivor_list[s].y;
             int dist = dx*dx + dy*dy;
             if (dist < min_dist) {
                 min_dist = dist;
-                closest = d;
+                closest = s;
             }
         }
         if (closest != -1) {
             struct json_object *mission = json_object_new_object();
             char mission_id[32];
-            snprintf(mission_id, sizeof(mission_id), "M%03d", s);
+            snprintf(mission_id, sizeof(mission_id), "M%03d", closest);
             json_object_object_add(mission, "type", json_object_new_string("ASSIGN_MISSION"));
             json_object_object_add(mission, "mission_id", json_object_new_string(mission_id));
             json_object_object_add(mission, "priority", json_object_new_string("high"));
 
             struct json_object *target = json_object_new_object();
-            json_object_object_add(target, "x", json_object_new_int(survivor_list[s].x));
-            json_object_object_add(target, "y", json_object_new_int(survivor_list[s].y));
+            json_object_object_add(target, "x", json_object_new_int(survivor_list[closest].x));
+            json_object_object_add(target, "y", json_object_new_int(survivor_list[closest].y));
             json_object_object_add(mission, "target", target);
 
             json_object_object_add(mission, "expiry", json_object_new_int(time(NULL) + 600));
             json_object_object_add(mission, "checksum", json_object_new_string("a1b2c3"));
 
             const char *mission_str = json_object_to_json_string(mission);
-            send(drone_list[closest].fd, mission_str, strlen(mission_str), 0);
+            send(drone_list[d].fd, mission_str, strlen(mission_str), 0);
             printf("Drone %s için görev atandı: Survivor (%d,%d)\n",
-                   drone_list[closest].id, survivor_list[s].x, survivor_list[s].y);
+                   drone_list[d].id, survivor_list[closest].x, survivor_list[closest].y);
 
-            strncpy(drone_list[closest].status, "on_mission", sizeof(drone_list[closest].status));
-            survivor_list[s].assigned = 1;
-            drone_busy[closest] = 1;
-
-            drone_list[closest].target_x = survivor_list[s].x;
-            drone_list[closest].target_y = survivor_list[s].y;
-            drone_list[closest].has_target = 1;
+            strncpy(drone_list[d].status, "on_mission", sizeof(drone_list[d].status));
+            survivor_list[closest].assigned = 1;
+            drone_list[d].target_x = survivor_list[closest].x;
+            drone_list[d].target_y = survivor_list[closest].y;
+            drone_list[d].has_target = 1;
 
             json_object_put(mission);
         }
@@ -251,6 +258,64 @@ void assign_missions() {
     pthread_mutex_unlock(&drone_list_mutex);
     pthread_mutex_unlock(&survivor_list_mutex);
 }
+// void assign_missions() {
+//     int drone_busy[MAX_DRONES] = {0};
+//     pthread_mutex_lock(&survivor_list_mutex);
+//     pthread_mutex_lock(&drone_list_mutex);
+
+//     for (int s = 0; s < survivor_count; ++s) {
+//         if (survivor_list[s].helped) continue;
+//         if (survivor_list[s].assigned) continue;
+
+//         int closest = -1;
+//         int min_dist = 1000000;
+//         for (int d = 0; d < drone_count; ++d) {
+//             if (strcmp(drone_list[d].status, "idle") != 0) continue;
+//             if (drone_busy[d]) continue;
+//             int dx = drone_list[d].x - survivor_list[s].x;
+//             int dy = drone_list[d].y - survivor_list[s].y;
+//             int dist = dx*dx + dy*dy;
+//             if (dist < min_dist) {
+//                 min_dist = dist;
+//                 closest = d;
+//             }
+//         }
+//         if (closest != -1) {
+//             struct json_object *mission = json_object_new_object();
+//             char mission_id[32];
+//             snprintf(mission_id, sizeof(mission_id), "M%03d", s);
+//             json_object_object_add(mission, "type", json_object_new_string("ASSIGN_MISSION"));
+//             json_object_object_add(mission, "mission_id", json_object_new_string(mission_id));
+//             json_object_object_add(mission, "priority", json_object_new_string("high"));
+
+//             struct json_object *target = json_object_new_object();
+//             json_object_object_add(target, "x", json_object_new_int(survivor_list[s].x));
+//             json_object_object_add(target, "y", json_object_new_int(survivor_list[s].y));
+//             json_object_object_add(mission, "target", target);
+
+//             json_object_object_add(mission, "expiry", json_object_new_int(time(NULL) + 600));
+//             json_object_object_add(mission, "checksum", json_object_new_string("a1b2c3"));
+
+//             const char *mission_str = json_object_to_json_string(mission);
+//             send(drone_list[closest].fd, mission_str, strlen(mission_str), 0);
+//             printf("Drone %s için görev atandı: Survivor (%d,%d)\n",
+//                    drone_list[closest].id, survivor_list[s].x, survivor_list[s].y);
+
+//             strncpy(drone_list[closest].status, "on_mission", sizeof(drone_list[closest].status));
+//             survivor_list[s].assigned = 1;
+//             drone_busy[closest] = 1;
+
+//             drone_list[closest].target_x = survivor_list[s].x;
+//             drone_list[closest].target_y = survivor_list[s].y;
+//             drone_list[closest].has_target = 1;
+
+//             json_object_put(mission);
+//         }
+//     }
+
+//     pthread_mutex_unlock(&drone_list_mutex);
+//     pthread_mutex_unlock(&survivor_list_mutex);
+// }
 int main() {
     printf("main başladı\n");
     view_init();

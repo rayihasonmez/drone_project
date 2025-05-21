@@ -78,7 +78,9 @@ for (int i = 0; i < survivor_count; ++i) {
     if (survivors[i].helped)
         color = (SDL_Color){128, 128, 128, 255}; // Gri
     else
-        color = (SDL_Color){220, 0, 0, 255};     // Kırmızı
+        color = (SDL_Color){200, 0, 0, 255}; // Kırmızı
+
+    // Kare olarak çiz
     SDL_Rect rect = { survivors[i].x * grid_size, survivors[i].y * grid_size, grid_size, grid_size };
     SDL_SetRenderDrawColor(ren, color.r, color.g, color.b, color.a);
     SDL_RenderFillRect(ren, &rect);
@@ -88,7 +90,6 @@ for (int i = 0; i < survivor_count; ++i) {
     snprintf(label, sizeof(label), "S%d", i+1);
     draw_text(rect.x + 2, rect.y - 18, label, color);
 }
-
 // Droneları çiz ve görevdeyse yeşil çizgi çiz
 for (int i = 0; i < drone_count; ++i) {
     // Sınır kontrolü
